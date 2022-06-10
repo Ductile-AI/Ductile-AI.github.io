@@ -1,0 +1,89 @@
+# NeRF (Neural Radiance Fields)
+
+
+
+
+NeRF (Neural Radiance Field) is a type of machine learning model which has demonstrated incredible performance in the synthesis of 3D models of a scene, from a number of 2d images. This post intends to give an overview of the method and some related other papers. The [original paper](https://arxiv.org/abs/2003.08934) was published in ECCV in 2020.
+
+A straightforward approach to this problem is to attempt to directly train a model which given a particular camera position will output what the camera would see from that position, this model could be viewed as a mapping from $((x,y,z),(\theta, \phi))$ to $R^{3\times H \times W}$. This would exactly match form of the data we have collected, however this approach has a problem, its really underconstrained! We would require quite a significant number of images to get any reasonable performance on new images.
+
+NeRF tackles the problem by using ideas from computer graphics to enable much better performance.
+
+The problem can be posed attempting to learn a model which given a point in the scene and a direction from which it is viewed, estimates the colour at that particular point and the volume density (the volume density in this case can be interpreted as how likely that a ray passing through the location will stop and not continue on, we can almost think of it like how transparent the object is at this location).
+
+We can write this down as mapping from a 5D input space to a 4D output space: $(x,y,z,\theta, \phi)$ to $((r,g,b), \sigma)$.
+
+Lets call this model $V$ , $V:R^5 \rightarrow R^4$, we can immediately see this function is much simpler than the model above! But the obvious point it that this model doesn't make pictures at all!  We don't have any data of the form that we want our model to output so how can we train anything?
+
+
+## Radiance Field
+
+
+A radiance field defines a vo
+
+
+---
+
+
+
+The trick which is core to the NeRF approach is that given a model of the simpler form, we can using ray tracing to generate a model of the original problem! One of the most obvious advantages of this approach is that it will make the outputs which our model generates consistent with each other! This inductive bias is the key to the excellent performance that NeRFs can achieve.
+
+To generate an image from our model we just implement a simple ray tracing algorithm. We start from our desired camera position sampling rays from it.
+
+
+We define our camera ray $r(t) = o + t d$.
+
+From the radiance field and a camera ray we can define a random variable which represent the colour which the ray will stop at.
+
+
+$$
+C(r) = \int_{t_n}^{t_f} T(t) \sigma (r(t)) c(r(t),d) dt 
+
+$$
+
+where $T(t)= \exp \left(- \int_{t_n}^{t} \sigma(r(s)) ds \right)$
+
+This entire process is possible to differentiate through, meaning that we can directly minimize the reconstruction loss through gradient descent.
+
+## Tricks
+
+This is the core idea behind NeRFs, however there are a few tips and tricks which can be used to improve the performance.
+
+### Positional Encoding
+
+The first of these is positional encoding, this is a non-learned function which is applied to the input which has been observed to improve the accuracy of high frequency details. This is a mapping from $R \rightarrow R^{2L}$ for some $L$, the idea is that neural networks are biased toward learning low frequency functions of the input space, by performing the mapping we make high frequency functions of the original input, low frequency functions of a sub set of the transformed input.
+
+
+$$
+\gamma(p) = \left(\sin(2^0 \pi p), \cos(2^0 \pi p), \ldots, \sin(2^{L-1} \pi p), \cos (2^{L-1} \pi p) \right)
+
+$$
+
+### Hierarchical Volume Sampling
+
+We can require a large amount of rays to get a sufficient covering of the image. An approach taken in the original NeRF paper is to have 2 networks to represent the scene. A coarse network and a fine network. The distinction between the 2 networks is not in their architecture but in their purpose.
+
+$N_c$ samples are taken along a particular ray in the coarse model, these samples are done via _statified sampling_ according to the paper. By this they mean that the ray is sampled from regularly spaced bins.
+
+Then the relative importance of each sample is estimated by calculation of their relative contribution to the final colour. Then we take $N_f$ samples from a piecewise constant distribution created from their relative contribution. These secondary samples should be samples which are of more importance to the output then performing _stratitified sampling_ alone.
+
+We optimize the sum of both the losses of the fine and course network. The coarse network on the original samples and the fine network on both.
+
+Having 2 distinct networks may seem unnecessary given that the fine network is being trained on both set of samples, and therefore we could just use it for the stratified sampling without requiring a coarse network. The benefit of having the coarse network is that due to the nature of the sampling we train it on, the model output for the coarse network should be an approximate average of neighboring values. This property makes the importance sampling more accurate.
+
+## Computational Speed Ups
+
+The original NeRF paper states that the optimization for a typical scene takes approximately 1-2 days on an NVIDIA V100 GPU.
+
+### Efficent NeRF
+
+- Reduces the size of the coarse network by half
+- Using a spherical harmonics model to predict color parameters
+- Sparse sampling
+- Voxel density estimation with momentum
+- Voxels with no density are not sampled from
+- The coarse and fine MLP are extracted into a tree of voxels for faster inference
+
+### Instant NGP
+
+#### Multiresolution Hash Encoding
