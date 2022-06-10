@@ -32,3 +32,6 @@ theme_color: blue
 
 # Build settings
 markdown: kramdown
+
+kramdown:
+  math_engine: katex
