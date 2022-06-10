@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Neural Radiance Fields</title>
+  <meta name="description" content="NeRF (Neural Radiance Fields)">
+
+  
+  
+  <link rel="stylesheet" href="http://localhost:4000/assets/style.css">
+
+  <link rel="canonical" href="http://localhost:4000/writing/2016/08/06/nerf.html">
+  <link rel="alternate" type="application/rss+xml" title="Ductile AI" href="http://localhost:4000/feed.xml">
+
+  <script async defer src="https://buttons.github.io/buttons.js"></script>
+</head>
+
+
+  <body>
+
+    <header class="border-bottom-thick px-2 clearfix">
+  <div class="left sm-width-full py-1 mt-1 mt-lg-0">
+    <a class="align-middle link-primary text-accent" href="/">
+      Ductile AI
+    </a>
+  </div>
+  <div class="right sm-width-full">
+    <ul class="list-reset mt-lg-1 mb-2 mb-lg-1">
+      
+        
+      
+        
+        <li class="inline-block">
+          <a class="align-middle link-primary mr-2 mr-lg-0 ml-lg-2" href="/">
+            Ductile AI
+          </a>
+        </li>
+        
+      
+    </ul>
+  </div>
+</header>
+
+
+    <div>
+      <article class="container px-2 mx-auto mb4" itemscope itemtype="http://schema.org/BlogPosting">
+  <h1 class="h0 col-9 sm-width-full py-4 mt-3 inline-block" itemprop="name headline">Neural Radiance Fields</h1>
+  <div class="col-4 sm-width-full mt-1 border-top-thin ">
+    <p class="mb-3 py-2 bold h4"><time datetime="2016-08-06T01:20:56+01:00" itemprop="datePublished">Aug 6, 2016</time></p>
+  </div>
+
+  <div class="prose" itemprop="articleBody">
+      <h1 id="nerf-neural-radiance-fields">NeRF (Neural Radiance Fields)</h1>
+
+<p>NeRF (Neural Radiance Field) is a type of machine learning model which has demonstrated incredible performance in the synthesis of 3D models of a scene, from a number of 2d images. This post intends to give an overview of the method and some related other papers. The <a href="https://arxiv.org/abs/2003.08934">original paper</a> was published in ECCV in 2020.</p>
+
+<p>A straightforward approach to this problem is to attempt to directly train a model which given a particular camera position will output what the camera would see from that position, this model could be viewed as a mapping from $((x,y,z),(\theta, \phi))$ to $R^{3\times H \times W}$. This would exactly match form of the data we have collected, however this approach has a problem, its really underconstrained! We would require quite a significant number of images to get any reasonable performance on new images.</p>
+
+<p>NeRF tackles the problem by using ideas from computer graphics to enable much better performance.</p>
+
+<p>The problem can be posed attempting to learn a model which given a point in the scene and a direction from which it is viewed, estimates the colour at that particular point and the volume density (the volume density in this case can be interpreted as how likely that a ray passing through the location will stop and not continue on, we can almost think of it like how transparent the object is at this location).</p>
+
+<p>We can write this down as mapping from a 5D input space to a 4D output space: $(x,y,z,\theta, \phi)$ to $((r,g,b), \sigma)$.</p>
+
+<p>Lets call this model $V$ , $V:R^5 \rightarrow R^4$, we can immediately see this function is much simpler than the model above! But the obvious point it that this model doesn’t make pictures at all!  We don’t have any data of the form that we want our model to output so how can we train anything?</p>
+
+<h2 id="radiance-field">Radiance Field</h2>
+
+<p>A radiance field defines a vo</p>
+
+<hr />
+
+<p>The trick which is core to the NeRF approach is that given a model of the simpler form, we can using ray tracing to generate a model of the original problem! One of the most obvious advantages of this approach is that it will make the outputs which our model generates consistent with each other! This inductive bias is the key to the excellent performance that NeRFs can achieve.</p>
+
+<p>To generate an image from our model we just implement a simple ray tracing algorithm. We start from our desired camera position sampling rays from it.</p>
+
+<p>We define our camera ray $r(t) = o + t d$.</p>
+
+<p>From the radiance field and a camera ray we can define a random variable which represent the colour which the ray will stop at.</p>
+
+\[C(r) = \int_{t_n}^{t_f} T(t) \sigma (r(t)) c(r(t),d) dt\]
+
+<p>where $T(t)= \exp \left(- \int_{t_n}^{t} \sigma(r(s)) ds \right)$</p>
+
+<p>This entire process is possible to differentiate through, meaning that we can directly minimize the reconstruction loss through gradient descent.</p>
+
+<h2 id="tricks">Tricks</h2>
+
+<p>This is the core idea behind NeRFs, however there are a few tips and tricks which can be used to improve the performance.</p>
+
+<h3 id="positional-encoding">Positional Encoding</h3>
+
+<p>The first of these is positional encoding, this is a non-learned function which is applied to the input which has been observed to improve the accuracy of high frequency details. This is a mapping from $R \rightarrow R^{2L}$ for some $L$, the idea is that neural networks are biased toward learning low frequency functions of the input space, by performing the mapping we make high frequency functions of the original input, low frequency functions of a sub set of the transformed input.</p>
+
+\[\gamma(p) = \left(\sin(2^0 \pi p), \cos(2^0 \pi p), \ldots, \sin(2^{L-1} \pi p), \cos (2^{L-1} \pi p) \right)\]
+
+<h3 id="hierarchical-volume-sampling">Hierarchical Volume Sampling</h3>
+
+<p>We can require a large amount of rays to get a sufficient covering of the image. An approach taken in the original NeRF paper is to have 2 networks to represent the scene. A coarse network and a fine network. The distinction between the 2 networks is not in their architecture but in their purpose.</p>
+
+<p>$N_c$ samples are taken along a particular ray in the coarse model, these samples are done via <em>statified sampling</em> according to the paper. By this they mean that the ray is sampled from regularly spaced bins.</p>
+
+<p>Then the relative importance of each sample is estimated by calculation of their relative contribution to the final colour. Then we take $N_f$ samples from a piecewise constant distribution created from their relative contribution. These secondary samples should be samples which are of more importance to the output then performing <em>stratitified sampling</em> alone.</p>
+
+<p>We optimize the sum of both the losses of the fine and course network. The coarse network on the original samples and the fine network on both.</p>
+
+<p>Having 2 distinct networks may seem unnecessary given that the fine network is being trained on both set of samples, and therefore we could just use it for the stratified sampling without requiring a coarse network. The benefit of having the coarse network is that due to the nature of the sampling we train it on, the model output for the coarse network should be an approximate average of neighboring values. This property makes the importance sampling more accurate.</p>
+
+<h2 id="computational-speed-ups">Computational Speed Ups</h2>
+
+<p>The original NeRF paper states that the optimization for a typical scene takes approximately 1-2 days on an NVIDIA V100 GPU.</p>
+
+<h3 id="efficent-nerf">Efficent NeRF</h3>
+
+<ul>
+  <li>Reduces the size of the coarse network by half</li>
+  <li>Using a spherical harmonics model to predict color parameters</li>
+  <li>Sparse sampling</li>
+  <li>Voxel density estimation with momentum</li>
+  <li>Voxels with no density are not sampled from</li>
+  <li>The coarse and fine MLP are extracted into a tree of voxels for faster inference</li>
+</ul>
+
+<h3 id="instant-ngp">Instant NGP</h3>
+
+<h4 id="multiresolution-hash-encoding">Multiresolution Hash Encoding</h4>
+
+  </div>
+
+</article>
+
+<div class="container mx-auto px-2 py-2 clearfix">
+  <!-- Use if you want to show previous and next for posts within a category. -->
+
+
+
+
+
+
+</div>
+
+    </div>
+
+    <div class="border-top-thin clearfix mt-2 mt-lg-4">
+  <div class="container mx-auto px-2">
+    <p class="col-8 sm-width-full left py-2 mb-0">This project is maintained by <a class="text-accent" href="https://github.com/jekyll">jekyll</a></p>
+    <ul class="list-reset right clearfix sm-width-full py-2 mb-2 mb-lg-0">
+      <li class="inline-block mr-1">
+        <a href="https://twitter.com/share" class="twitter-share-button" data-hashtags="Ductile AI">Tweet</a> <script>!function(d,s,id){var js,fjs=d.getElementsByTagName(s)[0],p=/^http:/.test(d.location)?'http':'https';if(!d.getElementById(id)){js=d.createElement(s);js.id=id;js.src=p+'://platform.twitter.com/widgets.js';fjs.parentNode.insertBefore(js,fjs);}}(document, 'script', 'twitter-wjs');</script>
+      </li>
+      <li class="inline-block">
+        <a class="github-button" href="https://github.com/jekyll/jekyll" data-icon="octicon-star" data-count-href="jekyll//stargazers" data-count-api="/repos/jekyll/#stargazers_count" data-count-aria-label="# stargazers on GitHub" aria-label="Star jekyll/ on GitHub">Star</a>
+      </li>
+    </ul>
+  </div>
+</div>
+
+
+  </body>
+
+</html>
